@@ -1,6 +1,7 @@
 package lib
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/url"
 	"time"
@@ -246,18 +247,14 @@ func (p *Provider) getSamlSessionCreds() (sts.Credentials, error) {
 	var profileARN string
 	var ok bool
 	source := sourceProfile(p.profile, p.profiles)
-	aadAwsTenant, err := p.getTenant()
-	if err != nil {
+
+	var creds AADCreds
+
+	item, err := p.keyring.Get(p.getAADAccountName())
+	if err = json.Unmarshal(item.Data, &creds); err != nil {
 		return sts.Credentials{}, err
 	}
-	aadAwsClientID, err := p.getClientID()
-	if err != nil {
-		return sts.Credentials{}, err
-	}
-	aadAwsSAMLUrl, err := p.getSamlURL()
-	if err != nil {
-		return sts.Credentials{}, err
-	}
+
 	aadSessionCookieKey := p.getAADSessionCookieKey()
 	aadAccountName := p.getAADAccountName()
 
@@ -285,9 +282,9 @@ func (p *Provider) getSamlSessionCreds() (sts.Credentials, error) {
 		Keyring:             p.keyring,
 		ProfileARN:          profileARN,
 		SessionDuration:     p.SessionDuration,
-		AADAwsSAMLUrl:       aadAwsSAMLUrl,
-		AADAwsTenant:        aadAwsTenant,
-		AADAwsClientID:      aadAwsClientID,
+		AADAwsTenant:        creds.Organization,
+		AADAwsClientID:      creds.MiddlewareClientID,
+		AADAwsClientSecret:  creds.MiddlewareClientSecret,
 		AADSessionCookieKey: aadSessionCookieKey,
 		AADAccountName:      aadAccountName,
 	}
@@ -296,27 +293,21 @@ func (p *Provider) getSamlSessionCreds() (sts.Credentials, error) {
 		provider.AwsRegion = region
 	}
 
-	creds, aadUsername, err := provider.Retrieve()
+	cred, aadUsername, err := provider.Retrieve()
 	if err != nil {
 		return sts.Credentials{}, err
 	}
 	p.defaultRoleSessionName = aadUsername
 
-	return creds, nil
+	return cred, nil
 }
 
 func (p *Provider) GetSAMLLoginURL() (*url.URL, error) {
 	source := sourceProfile(p.profile, p.profiles)
-	aadAwsTenant, err := p.getTenant()
-	if err != nil {
-		return &url.URL{}, err
-	}
-	aadAwsClientID, err := p.getClientID()
-	if err != nil {
-		return &url.URL{}, err
-	}
-	aadAwsSAMLUrl, err := p.getSamlURL()
-	if err != nil {
+	var creds AADCreds
+
+	item, err := p.keyring.Get(p.getAADAccountName())
+	if err = json.Unmarshal(item.Data, &creds); err != nil {
 		return &url.URL{}, err
 	}
 	aadSessionCookieKey := p.getAADSessionCookieKey()
@@ -329,9 +320,8 @@ func (p *Provider) GetSAMLLoginURL() (*url.URL, error) {
 		Keyring:             p.keyring,
 		ProfileARN:          profileARN,
 		SessionDuration:     p.SessionDuration,
-		AADAwsTenant:        aadAwsTenant,
-		AADAwsClientID:      aadAwsClientID,
-		AADAwsSAMLUrl:       aadAwsSAMLUrl,
+		AADAwsTenant:        creds.Organization,
+		AADAwsClientID:      creds.MiddlewareClientID,
 		AADSessionCookieKey: aadSessionCookieKey,
 		AADAccountName:      aadAccountName,
 	}

@@ -1,15 +1,16 @@
 package main
 
 import (
-	"aws-aad/cmd"
-	"aws-aad/utils/metadata"
+	"github.com/deamwork/aws-aad/cmd"
 )
 
+// These are set via linker flags
 var (
-	Version = "dev"
+	Version           = "dev"
+	AnalyticsWriteKey = ""
 )
 
 func main() {
-	metadata.SetAppName("aws-aad")
-	cmd.Start()
+	// vars set by linker flags must be strings...
+	cmd.Execute(Version, AnalyticsWriteKey)
 }

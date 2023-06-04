@@ -10,39 +10,115 @@ type AssumableRole struct {
 type AssumableRoles []AssumableRole
 
 type Response struct {
-	XMLName      xml.Name
-	SAMLP        string `xml:"xmlns:samlp,attr"`
-	SAML         string `xml:"xmlns:saml,attr"`
-	SAMLSIG      string `xml:"xmlns:samlsig,attr"`
+	XMLName xml.Name
+	SAMLP   string `xml:"xmlns:samlp,attr"`
+	//SAML         string `xml:"xmlns:saml,attr"`
+	//SAMLSIG      string `xml:"xmlns:samlsig,attr"`
 	Destination  string `xml:"Destination,attr"`
 	ID           string `xml:"ID,attr"`
 	Version      string `xml:"Version,attr"`
 	IssueInstant string `xml:"IssueInstant,attr"`
-	InResponseTo string `xml:"InResponseTo,attr"`
+	//InResponseTo string `xml:"InResponseTo,attr"`
 
+	Issuer    Issuer    `xml:"Issuer"`
+	Status    Status    `xml:"samlp:Status"`
 	Assertion Assertion `xml:"Assertion"`
-	Status    Status    `xml:"Status"`
 
 	originalString string
 }
 
+type Issuer struct {
+	XMLName xml.Name
+	X       string `xml:"xmlns,attr"`
+	Value   string `xml:",innerxml"`
+}
+
 type Assertion struct {
-	XMLName            xml.Name
-	ID                 string `xml:"ID,attr"`
-	Version            string `xml:"Version,attr"`
-	XS                 string `xml:"xmlns:xs,attr"`
-	XSI                string `xml:"xmlns:xsi,attr"`
-	SAML               string `xml:"saml,attr"`
+	XMLName xml.Name
+	ID      string `xml:"ID,attr"`
+	Version string `xml:"Version,attr"`
+	//XS                 string `xml:"xmlns:xs,attr"`
+	//XSI                string `xml:"xmlns:xsi,attr"`
+	//SAML               string `xml:"saml,attr"`
 	IssueInstant       string `xml:"IssueInstant,attr"`
+	Issuer             Issuer
+	Signature          Signature
 	Subject            Subject
 	Conditions         Conditions
 	AttributeStatement AttributeStatement
+	AuthnStatement     AuthnStatement
+}
+
+type Signature struct {
+	XMLName        xml.Name
+	X              string `xml:"xmlns,attr"`
+	SignedInfo     SignedInfo
+	SignatureValue SignatureValue
+	KeyInfo        KeyInfo
+}
+
+type SignatureValue struct {
+	Value string `xml:",innerxml"`
+}
+
+type KeyInfo struct {
+	X509Data X509Data
+}
+
+type X509Data struct {
+	X509Certificate X509Certificate
+}
+
+type X509Certificate struct {
+	Value string `xml:",innerxml"`
+}
+
+type SignedInfo struct {
+	CanonicalizationMethod CanonicalizationMethod
+	SignatureMethod        SignatureMethod
+	Reference              Reference
+}
+
+type Reference struct {
+	URI          string `xml:"URI,attr"`
+	Transforms   Transforms
+	DigestMethod DigestMethod
+	DigestValue  DigestValue
+}
+
+type Transforms struct {
+	Transforms []Transform `xml:"Transform"`
+}
+
+type Transform struct {
+	Algorithm string `xml:",attr"`
+}
+
+type DigestValue struct {
+	Value string `xml:",innerxml"`
+}
+
+type DigestMethod struct {
+	Algorithm string `xml:",attr"`
+}
+
+type SignatureMethod struct {
+	Algorithm string `xml:",attr"`
+}
+
+type CanonicalizationMethod struct {
+	Algorithm string `xml:",attr"`
 }
 
 type Conditions struct {
-	XMLName      xml.Name
-	NotBefore    string `xml:",attr"`
-	NotOnOrAfter string `xml:",attr"`
+	XMLName             xml.Name
+	NotBefore           string `xml:",attr"`
+	NotOnOrAfter        string `xml:",attr"`
+	AudienceRestriction AudienceRestriction
+}
+
+type AudienceRestriction struct {
+	Audience string `xml:",innerxml"`
 }
 
 type Subject struct {
@@ -59,7 +135,7 @@ type SubjectConfirmation struct {
 
 type Status struct {
 	XMLName    xml.Name
-	StatusCode StatusCode `xml:"StatusCode"`
+	StatusCode StatusCode `xml:"samlp:StatusCode"`
 }
 
 type SubjectConfirmationData struct {
@@ -96,4 +172,18 @@ type Attribute struct {
 type AttributeStatement struct {
 	XMLName    xml.Name
 	Attributes []Attribute `xml:"Attribute"`
+}
+
+type AuthnStatement struct {
+	AuthnInstant string `xml:"AuthnInstant,attr"`
+	SessionIndex string `xml:"SessionIndex,attr"`
+	AuthnContext AuthnContext
+}
+
+type AuthnContext struct {
+	AuthnContextClassRef AuthnContextClassRef
+}
+
+type AuthnContextClassRef struct {
+	Value string `xml:",innerxml"`
 }
