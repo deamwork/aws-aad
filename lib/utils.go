@@ -1,10 +1,13 @@
 package lib
 
 import (
+	"bytes"
 	"encoding/base64"
 	"encoding/xml"
+	"errors"
 	"fmt"
 	"github.com/deamwork/aws-aad/lib/saml"
+	"github.com/google/uuid"
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/net/html"
 	"os"
@@ -12,6 +15,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // Role arn format => arn:${Partition}:iam::${Account}:role/${RoleNameWithPath}
@@ -19,7 +23,6 @@ import (
 var awsRoleARNRegex = regexp.MustCompile(`arn:[a-z-]+:iam::(\d{12}):role/(.*)`)
 
 func GetRoleFromSAML(resp *saml.Response, profileARN string) (string, string, error) {
-
 	roles, err := GetAssumableRolesFromSAML(resp)
 	if err != nil {
 		return "", "", err
@@ -131,30 +134,70 @@ func GetRole(roleList saml.AssumableRoles, profileARN string) (saml.AssumableRol
 	return roleList[factorIdx], nil
 }
 
-func ParseSAML(body []byte, resp *SAMLAssertion) (err error) {
-	var val string
-	var data []byte
-	var doc *html.Node
+func ParseSAML(body []byte, resp *SAMLAssertion, tenant string) (err error) {
+	doc := parseSAML2(string(body))
+	// base64 encode the enriched template and write to lib.SAMLAssertion.RawData
+	dst := make([]byte, base64.StdEncoding.EncodedLen(len(doc)))
+	base64.RawStdEncoding.Encode(dst, doc)
+	resp.RawData = dst
 
-	doc, err = html.Parse(strings.NewReader(string(body)))
-	if err != nil {
+	referenceID := fmt.Sprintf("_%s", uuid.New())
+	// templating a full response since the AzureAD only returns assertion part
+	r := saml.Response{
+		SAMLP:       "urn:oasis:names:tc:SAML:2.0:protocol",
+		Destination: "https://cn-northwest-1.signin.amazonaws.cn/saml",
+		ID:          referenceID,
+		Version:     "2.0",
+		Issuer: saml.Issuer{
+			X:     "urn:oasis:names:tc:SAML:2.0:assertion",
+			Value: fmt.Sprintf("https://sts.windows.net/%s/", tenant),
+		},
+		IssueInstant: time.Now().UTC().Format(time.RFC3339),
+		Assertion:    saml.Assertion{},
+		Status: saml.Status{
+			StatusCode: saml.StatusCode{
+				Value: "urn:oasis:names:tc:SAML:2.0:status:Success",
+			},
+		},
+	}
+
+	log.Debugf(string(body))
+
+	// unmarshal assertion to the template
+	if err = xml.Unmarshal(body, &r.Assertion); err != nil {
 		return
 	}
 
-	val, _ = GetNode(doc, "SAMLResponse")
-	if val != "" {
-		resp.RawData = []byte(val)
-		val = strings.Replace(val, "&#x2b;", "+", -1)
-		val = strings.Replace(val, "&#x3d;", "=", -1)
-		data, err = base64.StdEncoding.DecodeString(val)
-		if err != nil {
-			return
-		}
+	//r.Assertion.AuthnStatement.SessionIndex = referenceID
+
+	// save the response
+	resp.Resp = &r
+
+	// marshal full template
+	b, err := xml.MarshalIndent(resp.Resp, "", "    ")
+	if err != nil {
+		return err
 	}
 
-	err = xml.Unmarshal(data, &resp.Resp)
+	b = bytes.ReplaceAll(b, []byte("Response"), []byte("samlp:Response"))
 
+	log.Debugf(string(b))
+
+	// base64 encode the enriched template and write to lib.SAMLAssertion.RawData
+	//dst := make([]byte, base64.StdEncoding.EncodedLen(len(b)))
+	//base64.RawStdEncoding.Encode(dst, b)
+	//resp.RawData = dst
 	return
+}
+
+func parseSAML2(body string) []byte {
+	template := `<samlp:Response ID="_%s" Version="2.0" IssueInstant="%s"
+            Destination="https://cn-northwest-1.signin.amazonaws.cn/saml" xmlns:samlp="urn:oasis:names:tc:SAML:2.0:protocol">
+            <Issuer xmlns="urn:oasis:names:tc:SAML:2.0:assertion">%s</Issuer>
+            <samlp:Status><samlp:StatusCode Value="urn:oasis:names:tc:SAML:2.0:status:Success"/></samlp:Status>
+            %s
+        </samlp:Response>`
+	return []byte(fmt.Sprintf(template, uuid.New(), time.Now().UTC().Format(time.RFC3339), "https://sts.windows.net/263fb4bc-63ab-4c6a-ad44-2b5d45524a97/", body))
 }
 
 func GetNode(n *html.Node, name string) (val string, node *html.Node) {

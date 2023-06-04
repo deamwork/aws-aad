@@ -1,6 +1,7 @@
 package lib
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -18,13 +19,15 @@ import (
 	"net/url"
 	"time"
 
-	azure "github.com/AzureAD/microsoft-authentication-library-for-go/apps/public"
+	azPri "github.com/AzureAD/microsoft-authentication-library-for-go/apps/confidential"
+	azPub "github.com/AzureAD/microsoft-authentication-library-for-go/apps/public"
 )
 
 const (
-	AADServerGlobal  = "login.microsoftonline.com"
-	AADServerCN      = "login.partner.microsoftonline.cn" // https://login.partner.microsoftonline.cn/login.srf?wa=wsignin1.0&whr=domain.tld
-	AADServerDefault = AADServerGlobal
+	AADServerGlobal   = "login.microsoftonline.com"
+	AADLauncherGlobal = "launcher.myapps.microsoft.com"
+	AADServerCN       = "login.partner.microsoftonline.cn" // https://login.partner.microsoftonline.cn/login.srf?wa=wsignin1.0&whr=domain.tld
+	AADServerDefault  = AADServerGlobal
 
 	// deprecated; use AADServerGlobal
 	AADServer = AADServerGlobal
@@ -32,31 +35,42 @@ const (
 	Timeout = time.Duration(60 * time.Second)
 )
 
-type AADClient struct {
-	// Organization will be deprecated in the future
-	Organization    string
-	Username        string
-	Password        string
-	UserAuth        azure.AuthResult
-	AccessKeyId     string
-	SecretAccessKey string
-	SessionToken    string
-	Expiration      time.Time
-	AADAwsSAMLUrl   string
-	AADAwsClientID  string
-	AADAwsTenant    string
-	CookieJar       http.CookieJar
-	BaseURL         *url.URL
-	Domain          string
-	MFAConfig       MFAConfig
+func GetAADDomain(region string) (string, error) {
+	switch region {
+	case "global":
+		return AADServerGlobal, nil
+	case "cn":
+		return AADServerCN, nil
+	}
+	return "", fmt.Errorf("invalid region %s", region)
 }
 
-func NewAADClient2(creds AADCreds, aadAwsSAMLUrl, aadAwsTenant, aadAwsClientID string, cookies AADCookies, mfaConfig MFAConfig) (*AADClient, error) {
+type AADClient struct {
+	// Organization will be deprecated in the future
+	Organization           string
+	Username               string
+	Password               string
+	UserAuth               azPub.AuthResult
+	UserCode               string
+	AccessKeyId            string
+	SecretAccessKey        string
+	SessionToken           string
+	Expiration             time.Time
+	MiddlewareClientID     string
+	MiddlewareClientSecret string
+	CLIClientID            string
+	CookieJar              http.CookieJar
+	BaseURL                *url.URL
+	Domain                 string
+	MFAConfig              MFAConfig
+}
+
+func NewAADClient2(creds AADCreds, cookies AADCookies, mfaConfig MFAConfig) (*AADClient, error) {
 	var domain string
 
 	// maintain compatibility for deprecated creds.Organization
 	if creds.Domain == "" && creds.Organization != "" {
-		domain = fmt.Sprintf("%s.%s", creds.Organization, AADServerDefault)
+		domain = AADServerDefault
 	} else if creds.Domain != "" {
 		domain = creds.Domain
 	} else {
@@ -64,9 +78,7 @@ func NewAADClient2(creds AADCreds, aadAwsSAMLUrl, aadAwsTenant, aadAwsClientID s
 	}
 
 	// url parse & set base
-	base, err := url.Parse(fmt.Sprintf(
-		"https://%s%s", domain, aadAwsTenant,
-	))
+	base, err := url.Parse(fmt.Sprintf("https://%s/%s", domain, creds.Organization))
 	if err != nil {
 		return nil, err
 	}
@@ -96,26 +108,26 @@ func NewAADClient2(creds AADCreds, aadAwsSAMLUrl, aadAwsTenant, aadAwsClientID s
 
 	return &AADClient{
 		// Setting Organization for backwards compatibility
-		Organization:   creds.Organization,
-		Username:       creds.Username,
-		Password:       creds.Password,
-		AADAwsSAMLUrl:  aadAwsSAMLUrl,
-		AADAwsClientID: aadAwsClientID,
-		AADAwsTenant:   aadAwsTenant,
-		CookieJar:      jar,
-		BaseURL:        base,
-		Domain:         domain,
-		MFAConfig:      mfaConfig,
+		Organization:           creds.Organization,
+		Username:               creds.Username,
+		Password:               creds.Password,
+		MiddlewareClientID:     creds.MiddlewareClientID,
+		MiddlewareClientSecret: creds.MiddlewareClientSecret,
+		CLIClientID:            creds.CLIClientID,
+		CookieJar:              jar,
+		BaseURL:                base,
+		Domain:                 domain,
+		MFAConfig:              mfaConfig,
 	}, nil
 }
 
 type AADProvider struct {
-	Keyring         keyring.Keyring
-	ProfileARN      string
-	SessionDuration time.Duration
-	AADAwsSAMLUrl   string
-	AADAwsTenant    string
-	AADAwsClientID  string
+	Keyring            keyring.Keyring
+	ProfileARN         string
+	SessionDuration    time.Duration
+	AADAwsTenant       string
+	AADAwsClientID     string
+	AADAwsClientSecret string
 	// AADSessionCookieKey represents the name of the session cookie
 	// to be stored in the keyring.
 	AADSessionCookieKey string
@@ -131,7 +143,7 @@ type MFAConfig struct {
 }
 
 type SAMLAssertion struct {
-	Resp    *saml.Response
+	Resp    *saml.Response `xml:"samlp:Response"`
 	RawData []byte
 }
 
@@ -141,6 +153,10 @@ type AADCreds struct {
 	Username     string
 	Password     string
 	Domain       string
+
+	MiddlewareClientID     string
+	MiddlewareClientSecret string
+	CLIClientID            string
 }
 
 type AADCookies struct {
@@ -175,7 +191,7 @@ func (p *AADProvider) Retrieve() (sts.Credentials, string, error) {
 		cookies.DeviceToken = string(cookieItem2.Data)
 	}
 
-	aadClient, err := NewAADClient2(aadCreds, p.AADAwsSAMLUrl, p.AADAwsTenant, p.AADAwsClientID, cookies, p.MFAConfig)
+	aadClient, err := NewAADClient2(aadCreds, cookies, p.MFAConfig)
 	if err != nil {
 		return sts.Credentials{}, "", err
 	}
@@ -208,61 +224,77 @@ func (p *AADProvider) Retrieve() (sts.Credentials, string, error) {
 	return creds, aadCreds.Username, err
 }
 
-func (o *AADClient) AuthenticateUser(client azure.Client, account azure.Account, scopes []string) (err error) {
-	// Step 1 : Basic authentication
-	log.Debug("Step: 1")
-	o.UserAuth, err = client.AcquireTokenByDeviceCode(
-		context.Background(),
-		scopes,
-		o.Username,
-		o.Password,
-	)
+func (o *AADClient) AuthenticateUser(ctx context.Context, client azPub.Client, account azPub.Account, scopes []string) (err error) {
+	ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
+	defer cancel()
+
+	// Step 1 : Basic authentication, request for device code
+	log.Debug("Step: 1, request for device code")
+	deviceCodeResult, err := client.AcquireTokenByDeviceCode(ctx, scopes)
 	if err != nil {
-		return fmt.Errorf("Failed to authenticate with okta. If your credentials have changed, use 'aws-aad add': %#v", err)
+		return fmt.Errorf("failed to authenticate with Azure AD. If your credentials have changed, use 'aws-aad add': %#v", err)
 	}
 
-	// Step 2 : Challenge MFA if needed
-	log.Debug("Step: 2")
-	if o.UserAuth.Status == "MFA_REQUIRED" {
-		log.Info("Requesting MFA. Please complete two-factor authentication with your second device")
-		if err = o.challengeMFA(); err != nil {
-			return err
-		}
+	o.UserCode = deviceCodeResult.Result.UserCode
+
+	log.Infof("Login in https://aka.ms/devicelogin (Cmd + Click) with code %s within 60 seconds", deviceCodeResult.Result.UserCode)
+	o.UserAuth, err = deviceCodeResult.AuthenticationResult(context.Background())
+	if err != nil {
+		return fmt.Errorf("failed to authenticate with aad. Maybe exceeded with 60 seconds?: %#v", err)
 	}
 
-	if o.UserAuth.SessionToken == "" {
+	// Step 2 : Exchange for access code
+	log.Debug("Step: 2, exchange for access code")
+
+	if o.UserAuth.AccessToken == "" {
 		return fmt.Errorf("authentication failed for %s", o.Username)
 	}
 
 	return nil
 }
 
-func (o *AADClient) accountSelection(accounts []azure.Account) azure.Account {
+func (o *AADClient) accountSelection(accounts []azPub.Account) azPub.Account {
 	for _, account := range accounts {
 		if account.PreferredUsername == o.Username {
 			return account
 		}
 	}
 
-	return azure.Account{}
+	return azPub.Account{}
 }
 
-func (o *AADClient) azureInit() (azure.Client, azure.Account, error) {
-	authority := fmt.Sprintf("https://%s%s/%s", AADServerDefault, o.AADAwsSAMLUrl, o.AADAwsTenant)
+func (o *AADClient) azureInitCLI() (azPub.Client, azPub.Account, error) {
+	authority := fmt.Sprintf("https://%s/%s", o.Domain, o.Organization)
 
-	aad, err := azure.New(o.AADAwsClientID, azure.WithAuthority(authority))
+	aad, err := azPub.New(o.CLIClientID, azPub.WithAuthority(authority))
 	if err != nil {
 		log.Error("Failed to start VM")
-		return azure.Client{}, azure.Account{}, err
+		return azPub.Client{}, azPub.Account{}, err
 	}
 
 	accounts, err := aad.Accounts(context.Background())
 	if err != nil {
 		log.Error("Failed to read cache")
-		return aad, azure.Account{}, err
+		return aad, azPub.Account{}, err
 	}
 
 	return aad, o.accountSelection(accounts), err
+}
+
+func (o *AADClient) azureInitPrivate() (azPri.Client, error) {
+	authority := fmt.Sprintf("https://%s/%s", o.Domain, o.Organization)
+	cred, err := azPri.NewCredFromSecret(o.MiddlewareClientSecret)
+	if err != nil {
+		log.Fatal("unable parse secret, %v", err)
+	}
+
+	aad, err := azPri.New(authority, o.MiddlewareClientID, cred)
+	if err != nil {
+		log.Error("Failed to start private VM")
+		return azPri.Client{}, err
+	}
+
+	return aad, err
 }
 
 func (o *AADClient) AuthenticateProfile3(profileARN string, duration time.Duration, region string) (sts.Credentials, AADCookies, error) {
@@ -270,45 +302,75 @@ func (o *AADClient) AuthenticateProfile3(profileARN string, duration time.Durati
 	// Attempt to reuse session cookie
 	var assertion SAMLAssertion
 	var oc AADCookies
-	scopes := []string{fmt.Sprintf("api://%s/user_impersonation", o.AADAwsClientID)}
+	var ctx = context.Background()
 
-	client, account, err := o.azureInit()
+	scopes := []string{fmt.Sprintf("api://%s/user_impersonation", o.MiddlewareClientID)}
+
+	client, account, err := o.azureInitCLI()
 	if err != nil {
 		return sts.Credentials{}, oc, err
 	}
 
-	authResult, err := client.AcquireTokenSilent(
-		context.Background(),
-		scopes,
-		azure.WithSilentAccount(account),
-	)
+	o.UserAuth, err = client.AcquireTokenSilent(ctx, scopes, azPub.WithSilentAccount(account))
 	if err != nil {
 		log.Debug("Failed to reuse session token, starting flow from start")
 
 		// Clear DT cookie before starting AuthN flow again. Bug #279.
-		o.CookieJar.SetCookies(o.BaseURL, []*http.Cookie{
-			{
-				Name:   "DT",
-				MaxAge: -1,
-			},
-		})
+		o.CookieJar.SetCookies(o.BaseURL, []*http.Cookie{{Name: "DT", MaxAge: -1}})
 
-		if err := o.AuthenticateUser(client, account, scopes); err != nil {
-			return sts.Credentials{}, oc, err
-		}
-
-		// Step 3 : Get SAML Assertion and retrieve IAM Roles
-		log.Debug("Step: 3")
-		if err = o.Get("GET", o.OktaAwsSAMLUrl+"?onetimetoken="+o.UserAuth.SessionToken,
-			nil, &assertion, "saml"); err != nil {
+		if err := o.AuthenticateUser(ctx, client, account, scopes); err != nil {
 			return sts.Credentials{}, oc, err
 		}
 	}
+
+	// Step 3 : Get SAML Assertion and retrieve IAM Roles via o.UserAuth
+	log.Debug("Step: 3, exchange code for SAML request")
+
+	pClient, err := o.azureInitPrivate()
+	if err != nil {
+		return sts.Credentials{}, oc, err
+	}
+	log.Debug("Step: 3.1, pClient init ok")
+
+	// exchange for SAML document
+	result, err := pClient.AcquireTokenOnBehalfOf(
+		ctx,
+		o.UserAuth.AccessToken,
+		//[]string{fmt.Sprintf("spn:%s/.default", o.CLIClientID)},
+		//[]string{fmt.Sprintf("api://%s/.default", o.CLIClientID)},
+		//[]string{fmt.Sprintf("spn:urn:amazon:webservices:cn-northwest-1/.default", o.CLIClientID)},
+		[]string{"urn:amazon:webservices:cn-north-1/.default"},
+		azPri.WithTokenType("urn:ietf:params:oauth:token-type:saml2"),
+	)
+	if err != nil {
+		return sts.Credentials{}, oc, err
+	}
+	log.Debug("Step: 3.2, exchange OBO SAML document ok")
+	//log.Debug(result.AccessToken)
+
+	// decode with URL safe base64
+	samlXML, err := base64.RawURLEncoding.DecodeString(result.AccessToken)
+	if err != nil {
+		log.Error(err)
+		return sts.Credentials{}, oc, err
+	}
+	log.Debug("Step: 3.3.1, decode document ok")
+
+	// Parse to assertion
+	if err = ParseSAML(samlXML, &assertion, o.Organization); err != nil {
+		log.Error(err)
+		return sts.Credentials{}, oc, err
+	}
+	log.Debug("Step: 3.3.2, parse SAML ok")
+
+	log.Debug("Step: 3.3, parse document ok")
 
 	principal, role, err := GetRoleFromSAML(assertion.Resp, profileARN)
 	if err != nil {
 		return sts.Credentials{}, oc, err
 	}
+
+	log.Debug("Step: 3.3, GetRoleFromSAML() ok")
 
 	// Step 4 : Assume Role with SAML
 	log.Debug("Step 4: Assume Role with SAML")
@@ -318,6 +380,7 @@ func (o *AADClient) AuthenticateProfile3(profileARN string, duration time.Durati
 		conf := &aws.Config{
 			Region:              aws.String(region),
 			STSRegionalEndpoint: endpoints.RegionalSTSEndpoint,
+			LogLevel:            aws.LogLevel(aws.LogDebug),
 		}
 		samlSess = session.Must(session.NewSession(conf))
 	} else {
@@ -352,10 +415,11 @@ func (o *AADClient) AuthenticateProfile3(profileARN string, duration time.Durati
 	return *samlResp.Credentials, oc, nil
 }
 
+// https://launcher.myapps.microsoft.com/api/signin/41f766d5-b8fc-49a9-a08f-26dbfab9284f?tenantId=263fb4bc-63ab-4c6a-ad44-2b5d45524a97
 func (p *AADProvider) GetSAMLLoginURL() (*url.URL, error) {
 	item, err := p.Keyring.Get(p.AADAccountName)
 	if err != nil {
-		log.Debugf("couldnt get azure ad creds from keyring: %s", err)
+		log.Debugf("couldnt get azPub ad creds from keyring: %s", err)
 		return &url.URL{}, err
 	}
 
@@ -368,19 +432,14 @@ func (p *AADProvider) GetSAMLLoginURL() (*url.URL, error) {
 
 	// maintain compatibility for deprecated creds.Organization
 	if aadCreds.Domain == "" && aadCreds.Organization != "" {
-		samlURL = fmt.Sprintf("%s.%s", aadCreds.Organization, AADServerDefault)
+		samlURL = AADLauncherGlobal
 	} else if aadCreds.Domain != "" {
 		samlURL = aadCreds.Domain
 	} else {
-		return &url.URL{}, errors.New("either aadCreds.Organization (deprecated) or aadCreds.Domain must be set, but not both. To remedy this, re-add your credentials with `aws-aad add`")
+		return &url.URL{}, errors.New("either creds.Organization (deprecated) or creds.Domain must be set, but not both. To remedy this, re-add your credentials with `aws-aad add`")
 	}
 
-	fullSamlURL, err := url.Parse(fmt.Sprintf(
-		"https://%s%s/%s",
-		samlURL,
-		p.AADAwsSAMLUrl,
-		p.AADAwsTenant,
-	))
+	fullSamlURL, err := url.Parse(fmt.Sprintf("https://%s/api/signin/%s?tenantId=%s", samlURL, aadCreds.MiddlewareClientID, aadCreds.Organization))
 
 	if err != nil {
 		return &url.URL{}, err
