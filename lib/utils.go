@@ -1,7 +1,6 @@
 package lib
 
 import (
-	"bytes"
 	"encoding/base64"
 	"encoding/xml"
 	"errors"
@@ -161,8 +160,6 @@ func ParseSAML(body []byte, resp *SAMLAssertion, tenant string) (err error) {
 		},
 	}
 
-	log.Debugf(string(body))
-
 	// unmarshal assertion to the template
 	if err = xml.Unmarshal(body, &r.Assertion); err != nil {
 		return
@@ -174,15 +171,13 @@ func ParseSAML(body []byte, resp *SAMLAssertion, tenant string) (err error) {
 	resp.Resp = &r
 
 	// marshal full template
-	b, err := xml.MarshalIndent(resp.Resp, "", "    ")
-	if err != nil {
-		return err
-	}
-
-	b = bytes.ReplaceAll(b, []byte("Response"), []byte("samlp:Response"))
-
-	log.Debugf(string(b))
-
+	//b, err := xml.MarshalIndent(resp.Resp, "", "    ")
+	//if err != nil {
+	//	return err
+	//}
+	//
+	//b = bytes.ReplaceAll(b, []byte("Response"), []byte("samlp:Response"))
+	//
 	// base64 encode the enriched template and write to lib.SAMLAssertion.RawData
 	//dst := make([]byte, base64.StdEncoding.EncodedLen(len(b)))
 	//base64.RawStdEncoding.Encode(dst, b)

@@ -16,7 +16,11 @@ func Prompt(prompt string, sensitive bool) (string, error) {
 
 func PromptWithOutput(prompt string, sensitive bool, output *os.File) (string, error) {
 	fmt.Fprintf(output, "%s: ", prompt)
-	defer fmt.Fprintf(output, "\n")
+	defer func() {
+		if sensitive {
+			fmt.Fprintf(output, "\n")
+		}
+	}()
 
 	if sensitive {
 		var input []byte

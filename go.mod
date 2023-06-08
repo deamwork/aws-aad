@@ -7,6 +7,7 @@ require (
 	github.com/AzureAD/microsoft-authentication-library-for-go v1.0.0
 	github.com/alessio/shellescape v1.4.1
 	github.com/aws/aws-sdk-go v1.44.269
+	github.com/google/uuid v1.3.0
 	github.com/mitchellh/go-homedir v1.1.0
 	github.com/sirupsen/logrus v1.9.2
 	github.com/skratchdot/open-golang v0.0.0-20200116055534-eef842397966
@@ -26,7 +27,6 @@ require (
 	github.com/dvsekhvalnov/jose2go v1.5.0 // indirect
 	github.com/godbus/dbus v0.0.0-20190726142602-4481cbc300e2 // indirect
 	github.com/golang-jwt/jwt/v4 v4.4.3 // indirect
-	github.com/google/uuid v1.3.0 // indirect
 	github.com/gsterjov/go-libsecret v0.0.0-20161001094733-a6f4afe4910c // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/jmespath/go-jmespath v0.4.0 // indirect
@@ -40,4 +40,4 @@ require (
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
 
-replace github.com/AzureAD/microsoft-authentication-library-for-go => ../testany/microsoft-authentication-library-for-go
+replace github.com/AzureAD/microsoft-authentication-library-for-go v1.0.0 => github.com/deamwork/microsoft-authentication-library-for-go v0.0.0-20230605033433-65a96bd0cdd6

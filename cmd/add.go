@@ -65,7 +65,7 @@ func add(cmd *cobra.Command, args []string) error {
 		}
 		defaultTenant := fmt.Sprintf("%s/%s", tld, organization)
 
-		aadTenant, err = lib.Prompt("will login via [https://"+defaultTenant+"]", false)
+		aadTenant, err = lib.Prompt("Will login via https://"+defaultTenant+", is that ok? (Enter/Ctrl-C)", false)
 		if err != nil {
 			return err
 		}
@@ -89,14 +89,13 @@ func add(cmd *cobra.Command, args []string) error {
 			return ErrFailedToGatherInformation
 		}
 
-		aadMiddlewareClientSecret, err = lib.Prompt("Middleware client secret", true)
+		aadMiddlewareClientSecret, err = lib.Prompt("Middleware client secret (secure-input)", true)
 		if err != nil {
 			return err
 		}
 		if aadMiddlewareClientSecret == "" {
 			return ErrFailedToGatherInformation
 		}
-
 	}
 
 	if username == "" {
@@ -118,7 +117,6 @@ func add(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	fmt.Println()
 
 	creds := lib.AADCreds{
 		Organization:           organization,

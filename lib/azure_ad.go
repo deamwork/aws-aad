@@ -374,13 +374,19 @@ func (o *AADClient) AuthenticateProfile3(profileARN string, duration time.Durati
 
 	// Step 4 : Assume Role with SAML
 	log.Debug("Step 4: Assume Role with SAML")
+
 	var samlSess *session.Session
 	if region != "" {
 		log.Debugf("Using region: %s\n", region)
+
+		logLevel := aws.LogOff
+		if log.GetLevel() == log.DebugLevel {
+			logLevel = aws.LogDebug
+		}
 		conf := &aws.Config{
 			Region:              aws.String(region),
 			STSRegionalEndpoint: endpoints.RegionalSTSEndpoint,
-			LogLevel:            aws.LogLevel(aws.LogDebug),
+			LogLevel:            aws.LogLevel(logLevel),
 		}
 		samlSess = session.Must(session.NewSession(conf))
 	} else {
